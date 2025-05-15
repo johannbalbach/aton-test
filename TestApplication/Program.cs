@@ -5,8 +5,10 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json.Serialization;
 using TestApplication.DataAccessLayer;
+using TestApplication.DataAccessLayer.Enums;
 using TestApplication.DataAccessLayer.Interfaces;
 using TestApplication.MappingProfile;
+using TestApplication.Middlewares.ExceptionHandler;
 using TestApplication.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +31,24 @@ builder.Services.AddSwaggerGen(c =>
         Scheme = "Bearer",
         Type = SecuritySchemeType.Http
     });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                },
+                Scheme = "Bearer",
+                Name = "Bearer",
+                In = ParameterLocation.Header
+            },
+            new List<string>()
+        }
+    });
 });
 
 builder.Services.AddAuthentication(options =>
@@ -49,6 +69,14 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true
     };
 });
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(Role.None.ToString(), policy => policy.RequireClaim("UserRole", Role.None.ToString()));
+    options.AddPolicy(Role.Admin.ToString(), policy => policy.RequireClaim("UserRole", Role.Admin.ToString()));
+});
+
+builder.Services.AddExceptionHandler<ExceptionHandler>();
+builder.Services.AddProblemDetails();
 
 builder.Services.AddScoped<IUserService, UserService>();
 
@@ -70,6 +98,8 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 
 app.UseAuthorization();
+
+app.UseExceptionHandler();
 
 app.MapControllers();
 

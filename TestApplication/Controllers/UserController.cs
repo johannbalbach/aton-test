@@ -1,88 +1,127 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using TestApplication.DataAccessLayer.Dto;
+using TestApplication.DataAccessLayer.Exceptions;
 using TestApplication.DataAccessLayer.Interfaces;
 
 namespace TestApplication.Controllers
 {
+    [Route("api/[controller]")]
     [ApiController]
-    [Route("user/[controller]")]
-    public class UserController : ControllerBase
+    public class UsersController : ControllerBase
     {
-        private readonly IUserService _service;
+        private readonly IUserService _userService;
 
-        public UserController(IUserService service)
+        public UsersController(IUserService userService, IMapper mapper)
         {
-            _service = service;
+            _userService = userService;
         }
-        [HttpPost("register")]
-        [AllowAnonymous]
-        public async Task<UserDto> Register(UserRegisterDto userDto)
+
+        #region create
+        [HttpPost]
+        [Authorize(Policy = "Admin")]
+        public async Task<UserReadDto> CreateUser([FromBody] UserCreateDto userDto)
         {
-            var result = await _service.RegisterUser(userDto);
-            return result;
+            return await _userService.CreateUser(userDto, GetCurrentLogin());
         }
 
         [HttpPost("login")]
         [AllowAnonymous]
-        public async Task<TokenResponseDto> Login([FromBody] LoginRequestDto loginRequest)
+        public async Task<TokenDto> Login([FromBody] LoginDto loginDto)
         {
-            var token = await _service.Login(loginRequest);
-            return token;
+            return await _userService.Login(loginDto);
         }
-        [HttpGet("GetMyProfile")]
+        #endregion
+
+        #region update
+
+        [HttpPut("{userId}")]
         [Authorize]
-        public async Task<UserDto> GetMyProfile()
+        public async Task<UserReadDto> UpdateUser(Guid userId, [FromBody] UserUpdateDto userDto)
         {
-            var user = await _service.GetUserById(GetUserId());
-            return user;
+            return await _userService.UpdateUser(userId, userDto, GetCurrentLogin(), GetCurrentGuid());
         }
 
-        [HttpGet("GetAllUsers")]
+        [HttpPut("{userId}/password")]
         [Authorize]
-        public async Task<UserBrieflyPaginationListDto> GetAllUsers([FromQuery] UserBrieflyPaginationListQueryDto query)
+        public async Task UpdatePassword(Guid userId, [FromBody] UserUpdatePasswordDto passwordDto)
         {
-            return await _service.GetAllUsers(query);
+            await _userService.UpdatePassword(userId, passwordDto.NewPassword, GetCurrentLogin(), GetCurrentGuid());
         }
 
-        [HttpGet("{id}")]
+        [HttpPut("{userId}/login")]
         [Authorize]
-        public async Task<UserDto> GetUser(Guid id)
+        public async Task UpdateLogin(Guid userId, [FromBody] UserUpdateLoginDto loginDto)
         {
-            var user = await _service.GetUserById(id);
-            return user;
+            await _userService.UpdateLogin(userId, loginDto.NewLogin, GetCurrentLogin(), GetCurrentGuid());
         }
 
-        [HttpPut("{id}")]
-        [Authorize(Roles = "Employee")]
-        public async Task<ActionResult> UpdateUser(Guid id, [FromBody] UserEditDto userDto)
+        [HttpPut("{userId}/restore")]
+        [Authorize(Policy = "Admin")]
+        public async Task RestoreUser(Guid userId)
         {
-            var success = await _service.UpdateUser(id, userDto);
-            return Ok(success);
+            await _userService.RestoreUser(userId, GetCurrentLogin());
         }
 
-        [HttpPost("{id}/block")]
-        [Authorize(Roles = "Employee")]
-        public async Task<ActionResult> BlockUser(Guid id, bool isBlocked)
+        #endregion
+
+        #region read
+        [HttpGet("list/all")]
+        [Authorize(Policy = "Admin")]
+        public async Task<List<UserReadDto>> GetAllActiveUsers([FromQuery] bool Revoked = false)
         {
-            var success = await _service.BlockUser(id, isBlocked);
-            return Ok(success);
+            return await _userService.GetAllActiveUsers(Revoked);
         }
 
-        [HttpGet("{id}/role")]
+        [HttpGet("{login}")]
+        [Authorize(Policy = "Admin")]
+        public async Task<UserReadDto> GetUserByLogin(string login)
+        {
+            return await _userService.GetUserByLogin(login);
+        }
+
+        [HttpPost("me")]
         [Authorize]
-        public async Task<UserRole> CheckRole(Guid id)
+        public async Task<UserReadDto> GetUserByLoginAndPassword([FromBody] LoginDto loginDto)
         {
-            return await _service.CheckRole(id);
+            return await _userService.GetUserByLoginAndPassword(loginDto.Login, loginDto.Password);
         }
 
-        private Guid GetUserId()
+        [HttpGet("list/older-than/{age}")]
+        [Authorize(Policy = "Admin")]
+        public async Task<List<UserReadDto>> GetUsersOlderThan(int age)
         {
-            var userEmailClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == "UserId")?.Value;
+            return await _userService.GetUsersOlderThan(age);
+        }
+        #endregion
 
-            if (userEmailClaim == null)
-                throw new Exception("Token not found");
+        [HttpDelete("{userId}")]
+        [Authorize(Policy = "Admin")]
+        public async Task DeleteUser(Guid userId, [FromQuery] bool softDelete = true)
+        {
+            await _userService.DeleteUser(userId, GetCurrentLogin(), softDelete);
+        }
 
-            return new Guid(userEmailClaim);
+        private string GetCurrentLogin()
+        {
+            var login = User.FindFirst(ClaimTypes.Name)?.Value;
+            if (string.IsNullOrEmpty(login))
+            {
+                throw new InvalidLoginException("User login not found in token");
+            }
+            return login;
+        }
+
+        private Guid GetCurrentGuid()
+        {
+            var guid = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(guid))
+            {
+                throw new InvalidLoginException("User Guid not found in token");
+            }
+            return Guid.Parse(guid);
         }
     }
 }

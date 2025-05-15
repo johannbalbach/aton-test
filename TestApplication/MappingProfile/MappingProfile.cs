@@ -9,8 +9,9 @@ namespace TestApplication.MappingProfile
         public MappingProfile()
         {
             CreateMap<UserCreateDto, User>();
-            CreateMap<User, UserReadDto>();
             CreateMap<UserUpdateDto, User>();
+            CreateMap<User, UserReadDto>()
+                .ForMember(dest => dest.isRevoked, opt => opt.MapFrom(src => src.RevokedOn.HasValue));
         }
     }
 }

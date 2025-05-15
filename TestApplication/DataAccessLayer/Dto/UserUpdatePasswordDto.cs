@@ -2,9 +2,9 @@
 
 namespace TestApplication.DataAccessLayer.Dto
 {
-    public class UserUpdateLogin
+    public class UserUpdatePasswordDto
     {
         [PasswordLoginValidator]
-        public string NewLogin { get; set; }
+        public string NewPassword { get; set; }
     }
 }

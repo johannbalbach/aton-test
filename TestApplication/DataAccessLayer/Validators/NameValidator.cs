@@ -19,7 +19,7 @@ namespace TestApplication.DataAccessLayer.Validators
                 return new ValidationResult("field is required");
 
             if (!AllowedPattern.IsMatch(input))
-                return new ValidationResult("only letters and digits are allowed");
+                return new ValidationResult("only russian and latinica letters are allowed");
 
             return ValidationResult.Success;
         }

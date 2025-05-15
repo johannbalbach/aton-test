@@ -40,8 +40,10 @@ namespace TestApplication.Middlewares.ExceptionHandler
             return exception switch
             {
                 InvalidLoginException invalidLoginException => (StatusCodes.Status403Forbidden, invalidLoginException.Message),
+                ForbiddenException forbiddenException => (StatusCodes.Status403Forbidden, forbiddenException.Message),
                 NotFoundException notFoundException => (StatusCodes.Status404NotFound, notFoundException.Message),
                 HttpRequestException httpRequestException => (StatusCodes.Status503ServiceUnavailable, httpRequestException.Message),
+                BadRequestException badRequestException => (StatusCodes.Status400BadRequest, badRequestException.Message),
                 _ => (StatusCodes.Status500InternalServerError, "Some stupid error occured")
             };
         }

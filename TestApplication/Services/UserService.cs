@@ -28,7 +28,7 @@ namespace TestApplication.Services
             EnsureAdminExist();
         }
 
-        public async Task<User> CreateUser(UserCreateDto userDto, string createdBy) 
+        public async Task<UserReadDto> CreateUser(UserCreateDto userDto, string createdBy) 
         {
             if (await _context.Users.AnyAsync(u => u.Login == userDto.Login))
                 throw new BadRequestException("this login is already occupied");
@@ -43,35 +43,49 @@ namespace TestApplication.Services
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
-            return user;
+
+            var userReadDto = _mapper.Map<UserReadDto>(user);
+
+            return userReadDto;
         }
-        public async Task<User> UpdateUser(Guid userId, UserUpdateDto userDto, string modifiedBy)
+        public async Task<UserReadDto> UpdateUser(Guid userId, UserUpdateDto userDto, string modifiedBy, Guid modifiedById)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Guid == userId && u.RevokedOn == null);
             if (user == null)
                 throw new NotFoundException("user not found or inactive");
+
+            var currentUser = await _context.Users.FirstOrDefaultAsync(u => u.Guid == modifiedById);
+            if (!currentUser.Admin && currentUser.Guid != userId)
+                throw new ForbiddenException("u dont have enough rights to do it action");
 
             _mapper.Map(userDto, user);
             user.ModifiedOn = DateTime.UtcNow;
             user.ModifiedBy = modifiedBy;
 
             await _context.SaveChangesAsync();
-            return user;
+            var userReadDto = _mapper.Map<UserReadDto>(user);
+
+            return userReadDto;
         }
-        public async Task<User> UpdatePassword(Guid userId, string newPassword, string modifiedBy)
+        public async Task UpdatePassword(Guid userId, string newPassword, string modifiedBy, Guid modifiedById)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Guid == userId && u.RevokedOn == null);
             if (user == null)
                 throw new NotFoundException("user not found or inactive");
+
+            var currentUser = await _context.Users.FirstOrDefaultAsync(u => u.Guid == modifiedById);
+            if (!currentUser.Admin && currentUser.Guid != userId)
+                throw new ForbiddenException("u dont have enough rights to do it action");
 
             user.Password = newPassword;
             user.ModifiedOn = DateTime.UtcNow;
             user.ModifiedBy = modifiedBy;
 
             await _context.SaveChangesAsync();
-            return user;
+
+            return;
         }
-        public async Task<User> UpdateLogin(Guid userId, string newLogin, string modifiedBy)
+        public async Task UpdateLogin(Guid userId, string newLogin, string modifiedBy, Guid modifiedById)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Guid == userId && u.RevokedOn == null);
             if (user == null)
@@ -80,29 +94,51 @@ namespace TestApplication.Services
             if (await _context.Users.AnyAsync(u => u.Login == newLogin && u.Guid != userId))
                 throw new BadRequestException("this login is already occupied");
 
+            var currentUser = await _context.Users.FirstOrDefaultAsync(u => u.Guid == modifiedById);
+            if (!currentUser.Admin && currentUser.Guid != userId)
+                throw new ForbiddenException("u dont have enough rights to do it action");
+
+                
             user.Login = newLogin;
             user.ModifiedOn = DateTime.UtcNow;
             user.ModifiedBy = modifiedBy;
 
             await _context.SaveChangesAsync();
-            return user;
+
+            return;
         }
-        public async Task<List<User>> GetAllActiveUsers()
+        public async Task<List<UserReadDto>> GetAllActiveUsers(bool Revoked)
         {
-            return await _context.Users.Where(u => u.RevokedOn == null).ToListAsync();
+            return _mapper.Map<List<UserReadDto>>(await _context.Users.Where(u => Revoked ? u.RevokedOn != null : u.RevokedOn == null).OrderBy(u => u.CreatedOn).ToListAsync());
         }
-        public async Task<User> GetUserByLogin(string login)
+        public async Task<UserReadDto> GetUserByLogin(string login)
         {
-            return await _context.Users.FirstOrDefaultAsync(u => u.Login == login);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Login == login && u.RevokedOn == null);
+            if (user == null)
+                throw new NotFoundException("user not found or inactive");
+
+            var userReadDto = _mapper.Map<UserReadDto>(user);
+
+            return userReadDto;
         }
-        public async Task<User> GetUserByLoginAndPassword(string login, string password)
+        public async Task<UserReadDto> GetUserByLoginAndPassword(string login, string password)
         {
-            return await _context.Users.FirstOrDefaultAsync(u => u.Login == login && u.Password == password && u.RevokedOn == null);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Login == login && u.Password == password && u.RevokedOn == null);
+            if (user == null)
+                throw new NotFoundException("user not found or inactive");
+
+            var userReadDto = _mapper.Map<UserReadDto>(user);
+
+            return userReadDto;
         }
-        public async Task<List<User>> GetUsersOlderThan(int age)
+        public async Task<List<UserReadDto>> GetUsersOlderThan(int age)
         {
             var date = DateTime.UtcNow.AddYears(-age);
-            return await _context.Users.Where(u => u.Birthday.HasValue && u.Birthday.Value < date && u.RevokedOn == null).ToListAsync();
+            var userList = await _context.Users.Where(u => u.Birthday.HasValue && u.Birthday.Value < date && u.RevokedOn == null).ToListAsync();
+            if (userList == null)
+                throw new NotFoundException("user not found or inactive");
+
+            return _mapper.Map<List<UserReadDto>>(userList);
         }
         public async Task DeleteUser(Guid userId, string revokedBy, bool softDelete = true)
         {
@@ -137,7 +173,7 @@ namespace TestApplication.Services
         }
         public async Task<TokenDto> Login(LoginDto loginDto)
         {
-            var user = await GetUserByLoginAndPassword(loginDto.Login, loginDto.Password);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Login == loginDto.Login && u.Password == loginDto.Password && u.RevokedOn == null);
             if (user == null)
                 throw new InvalidLoginException("invalid login or password");
 
@@ -149,7 +185,7 @@ namespace TestApplication.Services
                 {
                     new Claim(ClaimTypes.NameIdentifier, user.Guid.ToString()),
                     new Claim(ClaimTypes.Name, user.Login),
-                    new Claim("isadmin", user.Admin.ToString()),
+                    new Claim("UserRole", RoleConverter.Convert(user.Admin).ToString()),
                 }),
                 Expires = DateTime.UtcNow.AddMinutes(double.Parse(_configuration["Jwt:AccessLifeTime"])),
                 Issuer = _configuration["Jwt:Issuer"],
